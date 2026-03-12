@@ -2,202 +2,144 @@ import streamlit as st
 import pandas as pd
 import uuid
 
-# Configuração da página
 st.set_page_config(page_title="PCP - Sistema de Produção PHIQ", layout="wide")
 
 # ==========================================
 # INICIALIZAÇÃO DO BANCO DE DADOS EM MEMÓRIA
 # ==========================================
-# 1. Linhas de Produção (Editáveis)
 if 'linhas' not in st.session_state:
     st.session_state.linhas = [
-        {'id': 0, 'nome': 'Linha 1 - Alta Capacidade'},
-        {'id': 1, 'nome': 'Linha 2 - Fracionados'},
-        {'id': 2, 'nome': 'Linha 3'},
-        {'id': 3, 'nome': 'Linha 4'},
-        {'id': 4, 'nome': 'Linha 5'},
-        {'id': 5, 'nome': 'Linha 6'}
+        {'id': 0, 'nome': 'Linha 1 - Alta Cap.'}, {'id': 1, 'nome': 'Linha 2 - Fracionados'},
+        {'id': 2, 'nome': 'Linha 3'}, {'id': 3, 'nome': 'Linha 4'},
+        {'id': 4, 'nome': 'Linha 5'}, {'id': 5, 'nome': 'Linha 6'}
     ]
 
-# 2. Catálogo de Produtos
 if 'catalogo' not in st.session_state:
+    # Tempos agora em MINUTOS
     st.session_state.catalogo = [
-        {'id': str(uuid.uuid4())[:8], 'nome': 'Desengraxante Industrial 20L', 't_form': 3.0, 't_env': 1.5, 't_rot': 1.0},
-        {'id': str(uuid.uuid4())[:8], 'nome': 'Sanitizante Hospitalar 5L', 't_form': 2.0, 't_env': 2.0, 't_rot': 1.5}
+        {'id': str(uuid.uuid4())[:8], 'nome': 'Desengraxante Industrial 20L', 't_form': 180, 't_env': 90, 't_rot': 60},
+        {'id': str(uuid.uuid4())[:8], 'nome': 'Sanitizante Hospitalar 5L', 't_form': 120, 't_env': 120, 't_rot': 90}
     ]
 
-# 3. Equipe de Operadores
-if 'equipe' not in st.session_state:
-    st.session_state.equipe = [
-        {'id': str(uuid.uuid4())[:8], 'nome': 'Carlos Silva', 'linha_id': None, 'etapa': None},
-        {'id': str(uuid.uuid4())[:8], 'nome': 'Ana Souza', 'linha_id': None, 'etapa': None}
-    ]
+if 'agenda_semanal' not in st.session_state:
+    # Estrutura para o Calendário: Armazena o que vai ser produzido, onde e quando
+    st.session_state.agenda_semanal = []
 
-# 4. Ordens de Produção Ativas
-if 'ordens_producao' not in st.session_state:
-    st.session_state.ordens_producao = []
+dias_semana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta"]
 
 # ==========================================
-# FUNÇÕES DE LÓGICA DE NEGÓCIO
+# FUNÇÕES DE LÓGICA
 # ==========================================
-def avancar_etapa_produto(ordem_id):
-    etapas = ["Formulação", "Envasamento", "Rotulagem/Encaixotamento", "Concluído"]
-    for ordem in st.session_state.ordens_producao:
-        if ordem['id'] == ordem_id:
-            idx = etapas.index(ordem['status'])
-            if idx < len(etapas) - 1:
-                ordem['status'] = etapas[idx + 1]
-            break
-
-def alocar_funcionario(func_id, linha_id, nova_etapa):
-    for func in st.session_state.equipe:
-        if func['id'] == func_id:
-            func['linha_id'] = linha_id
-            func['etapa'] = nova_etapa
-            break
-
-def liberar_funcionario(func_id):
-    for func in st.session_state.equipe:
-        if func['id'] == func_id:
-            func['linha_id'] = None
-            func['etapa'] = None
-            break
-
-def get_nome_linha(linha_id):
-    for l in st.session_state.linhas:
-        if l['id'] == linha_id:
-            return l['nome']
-    return "Desconhecida"
+def remover_da_agenda(item_id):
+    st.session_state.agenda_semanal = [item for item in st.session_state.agenda_semanal if item['id'] != item_id]
 
 # ==========================================
 # INTERFACE PRINCIPAL
 # ==========================================
-st.title("🏭 PCP - Planejamento e Controle de Produção")
+st.title("🏭 PCP - Sequenciamento de Produção")
 st.markdown("---")
 
-tab_kanban, tab_catalogo, tab_rh, tab_config = st.tabs([
-    "📋 Kanban de Operações", 
-    "📖 Catálogo de Produtos", 
-    "👥 Gestão de Equipe",
+tab_calendario, tab_catalogo, tab_config = st.tabs([
+    "📅 Programação Semanal", 
+    "📖 Catálogo (Minutos)", 
     "⚙️ Configurações"
 ])
 
 # ==========================================
-# ABA 1: CHÃO DE FÁBRICA (KANBAN)
+# ABA 1: PROGRAMAÇÃO SEMANAL (MATRIZ / CALENDÁRIO)
 # ==========================================
-with tab_kanban:
-    # Cabeçalho para lançar nova Ordem de Produção
-    with st.expander("➕ Lançar Nova Ordem de Produção", expanded=False):
-        col_prod, col_linha, col_qtd, col_btn = st.columns([2, 2, 1, 1])
-        
-        nomes_produtos = [p['nome'] for p in st.session_state.catalogo]
-        nomes_linhas = {l['nome']: l['id'] for l in st.session_state.linhas}
-        
-        with col_prod:
-            produto_selecionado = st.selectbox("Produto", options=nomes_produtos if nomes_produtos else ["Sem produtos"])
-        with col_linha:
-            linha_selecionada = st.selectbox("Destino", options=list(nomes_linhas.keys()))
-        with col_qtd:
-            qtd_lote = st.number_input("Qtd", min_value=1, value=100)
-        with col_btn:
-            st.write("") 
-            st.write("")
-            if st.button("Iniciar Produção 🚀", use_container_width=True) and nomes_produtos:
-                prod_ref = next(p for p in st.session_state.catalogo if p['nome'] == produto_selecionado)
-                linha_id_selecionada = nomes_linhas[linha_selecionada]
-                
-                nova_op = {
-                    'id': str(uuid.uuid4())[:8],
-                    'nome': produto_selecionado,
-                    'qtd': qtd_lote,
-                    'linha_id': linha_id_selecionada,
-                    't_form': prod_ref['t_form'],
-                    't_env': prod_ref['t_env'],
-                    't_rot': prod_ref['t_rot'],
-                    'status': 'Formulação'
-                }
-                st.session_state.ordens_producao.append(nova_op)
-                st.rerun()
-
-    st.markdown("### Visão por Linha de Produção")
+with tab_calendario:
+    col_esq, col_dir = st.columns([1, 4])
     
-    # Criar sub-abas para cada linha de produção
-    abas_linhas = st.tabs([l['nome'] for l in st.session_state.linhas])
-    etapas = ["Formulação", "Envasamento", "Rotulagem/Encaixotamento", "Concluído"]
-    
-    for idx_linha, aba in enumerate(abas_linhas):
-        linha_atual = st.session_state.linhas[idx_linha]
-        
-        with aba:
-            cols = st.columns(len(etapas))
+    # --- PAINEL ESQUERDO: ENVIO PARA A LINHA ---
+    with col_esq:
+        st.markdown("### 📥 Alocar Produção")
+        with st.container(border=True):
+            nomes_produtos = [p['nome'] for p in st.session_state.catalogo]
+            nomes_linhas = {l['nome']: l['id'] for l in st.session_state.linhas}
             
-            for col, etapa in zip(cols, etapas):
-                with col:
-                    st.markdown(f"#### {etapa}")
-                    
-                    # --- GESTÃO DE PESSOAS NA ETAPA (Por Linha) ---
-                    if etapa != "Concluído":
-                        with st.container(border=True):
-                            st.markdown("**👷 Equipe**")
-                            
-                            # Mostrar quem está alocado NESTA linha e NESTA etapa
-                            equipe_aqui = [f for f in st.session_state.equipe if f['linha_id'] == linha_atual['id'] and f['etapa'] == etapa]
-                            for func in equipe_aqui:
-                                cols_func = st.columns([3, 1])
-                                cols_func[0].caption(f"👤 {func['nome']}")
-                                cols_func[1].button("✖", key=f"liberar_{func['id']}", on_click=liberar_funcionario, args=(func['id'],), help="Liberar")
-                            
-                            # Adicionar pessoas livres (etapa == None)
-                            livres = [f for f in st.session_state.equipe if f['etapa'] is None]
-                            if livres:
-                                opcoes_livres = {f['nome']: f['id'] for f in livres}
-                                selecao = st.selectbox("Alocar...", options=["Selecione..."] + list(opcoes_livres.keys()), key=f"sel_rh_{linha_atual['id']}_{etapa}")
-                                if selecao != "Selecione...":
-                                    alocar_funcionario(opcoes_livres[selecao], linha_atual['id'], etapa)
-                                    st.rerun()
-                            else:
-                                st.caption("*Sem recursos livres.*")
+            produto_sel = st.selectbox("1. Produto", options=nomes_produtos if nomes_produtos else ["Sem produtos"])
+            qtd_lote = st.number_input("2. Quantidade", min_value=1, value=100)
+            linha_sel = st.selectbox("3. Linha de Destino", options=list(nomes_linhas.keys()))
+            dia_sel = st.selectbox("4. Dia da Semana", options=dias_semana)
+            
+            if st.button("Alocar no Quadro ➡️", use_container_width=True, type="primary") and nomes_produtos:
+                prod_ref = next(p for p in st.session_state.catalogo if p['nome'] == produto_sel)
+                tempo_total_min = prod_ref['t_form'] + prod_ref['t_env'] + prod_ref['t_rot']
+                
+                novo_agendamento = {
+                    'id': str(uuid.uuid4())[:8],
+                    'nome': produto_sel,
+                    'qtd': qtd_lote,
+                    'linha_id': nomes_linhas[linha_sel],
+                    'dia': dia_sel,
+                    'tempo_total': tempo_total_min
+                }
+                st.session_state.agenda_semanal.append(novo_agendamento)
+                st.rerun()
+                
+        st.markdown("### 📋 Resumo Catálogo")
+        # Mostra o catálogo de forma resumida na lateral
+        for p in st.session_state.catalogo:
+            st.caption(f"**{p['nome']}** | {(p['t_form']+p['t_env']+p['t_rot'])} min")
 
-                    st.markdown("---")
+    # --- PAINEL DIREITO: QUADRO CALENDÁRIO ---
+    with col_dir:
+        st.markdown("### 🗓️ Painel de Sequenciamento das Linhas")
+        
+        # Cabeçalho dos dias da semana
+        cols_dias = st.columns(6) # 1 coluna para o nome da linha + 5 para os dias
+        cols_dias[0].markdown("**Linhas**")
+        for i, dia in enumerate(dias_semana):
+            cols_dias[i+1].markdown(f"**{dia}**")
+            
+        st.markdown("---")
+        
+        # Matriz Linhas x Dias
+        for linha in st.session_state.linhas:
+            cols_matriz = st.columns(6)
+            
+            # Nome da linha na primeira coluna
+            with cols_matriz[0]:
+                st.markdown(f"*{linha['nome']}*")
+                
+            # Dias da semana nas colunas seguintes
+            for i, dia in enumerate(dias_semana):
+                with cols_matriz[i+1]:
+                    # Filtra o que está agendado para esta linha neste dia
+                    itens_dia_linha = [item for item in st.session_state.agenda_semanal if item['linha_id'] == linha['id'] and item['dia'] == dia]
                     
-                    # --- GESTÃO DE PRODUTOS NA ETAPA (Por Linha) ---
-                    itens_na_etapa = [op for op in st.session_state.ordens_producao if op['status'] == etapa and op['linha_id'] == linha_atual['id']]
-                    if not itens_na_etapa:
-                        st.info("Vazio.")
-                        
-                    for op in itens_na_etapa:
-                        with st.container(border=True):
-                            st.write(f"**📦 {op['nome']}**")
-                            st.write(f"Qtd: {op['qtd']}")
-                            
-                            if etapa == "Formulação": st.write(f"⏱️ {op['t_form']}h")
-                            elif etapa == "Envasamento": st.write(f"⏱️ {op['t_env']}h")
-                            elif etapa == "Rotulagem/Encaixotamento": st.write(f"⏱️ {op['t_rot']}h")
-                            
-                            if etapa != "Concluído":
-                                st.button(
-                                    "Avançar ➡️", 
-                                    key=f"btn_avancar_{op['id']}", 
-                                    on_click=avancar_etapa_produto, 
-                                    args=(op['id'],),
-                                    use_container_width=True,
-                                    type="primary"
-                                )
+                    tempo_ocupado = sum([item['tempo_total'] for item in itens_dia_linha])
+                    
+                    with st.container(border=True):
+                        if not itens_dia_linha:
+                            st.caption("Livre")
+                        else:
+                            for item in itens_dia_linha:
+                                st.markdown(f"**{item['nome']}**")
+                                st.caption(f"Qtd: {item['qtd']} | ⏱️ {item['tempo_total']} min")
+                                st.button("Remover", key=f"del_{item['id']}", on_click=remover_da_agenda, args=(item['id'],), help="Tirar da agenda")
+                            st.markdown("---")
+                            # Alerta visual simples se passar de 480 min (8 horas)
+                            if tempo_ocupado > 480:
+                                st.error(f"Total: {tempo_ocupado}m (Sobrecarga!)")
+                            else:
+                                st.success(f"Total: {tempo_ocupado}m")
 
 # ==========================================
-# ABA 2: CATÁLOGO DE PRODUTOS (Inalterada da versão anterior)
+# ABA 2: CATÁLOGO DE PRODUTOS
 # ==========================================
 with tab_catalogo:
-    st.header("Cadastrar Produto")
+    st.header("Cadastrar Produto (Tempos em Minutos)")
     with st.form("form_catalogo", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             nome_produto = st.text_input("Nome do Produto")
         with col2:
             col2_1, col2_2, col2_3 = st.columns(3)
-            t_form = col2_1.number_input("Formulação (h)", min_value=0.0, step=0.5)
-            t_env = col2_2.number_input("Envasamento (h)", min_value=0.0, step=0.5)
-            t_rot = col2_3.number_input("Rotulagem (h)", min_value=0.0, step=0.5)
+            t_form = col2_1.number_input("Formulação (min)", min_value=0, step=10)
+            t_env = col2_2.number_input("Envasamento (min)", min_value=0, step=10)
+            t_rot = col2_3.number_input("Rotulagem (min)", min_value=0, step=10)
             
         if st.form_submit_button("Salvar no Catálogo") and nome_produto:
             st.session_state.catalogo.append({
@@ -208,59 +150,22 @@ with tab_catalogo:
 
     if st.session_state.catalogo:
         df_cat = pd.DataFrame(st.session_state.catalogo)
-        df_cat['Total (h)'] = df_cat['t_form'] + df_cat['t_env'] + df_cat['t_rot']
-        st.dataframe(df_cat[['nome', 't_form', 't_env', 't_rot', 'Total (h)']], use_container_width=True, hide_index=True)
+        df_cat['Tempo Total (min)'] = df_cat['t_form'] + df_cat['t_env'] + df_cat['t_rot']
+        st.dataframe(df_cat[['nome', 't_form', 't_env', 't_rot', 'Tempo Total (min)']], use_container_width=True, hide_index=True)
 
 # ==========================================
-# ABA 3: GESTÃO DE EQUIPE (RH)
-# ==========================================
-with tab_rh:
-    st.header("Cadastrar Operador")
-    with st.form("form_novo_rh", clear_on_submit=True):
-        nome_func = st.text_input("Nome do Funcionário")
-        if st.form_submit_button("Cadastrar") and nome_func:
-            st.session_state.equipe.append({'id': str(uuid.uuid4())[:8], 'nome': nome_func, 'linha_id': None, 'etapa': None})
-            st.success("Cadastrado!")
-            st.rerun()
-
-    st.subheader("Painel Geral de Alocação")
-    if st.session_state.equipe:
-        # Preparar dados para exibição
-        dados_rh = []
-        for f in st.session_state.equipe:
-            if f['etapa'] is None:
-                status = "Livre"
-            else:
-                nome_linha = get_nome_linha(f['linha_id'])
-                status = f"{f['etapa']} ({nome_linha})"
-            dados_rh.append({'Nome': f['nome'], 'Status': status})
-            
-        df_rh = pd.DataFrame(dados_rh)
-        
-        def highlight_livre(val):
-            color = '#d4edda' if val == 'Livre' else '#fff3cd'
-            return f'background-color: {color}; color: black'
-        
-        st.dataframe(df_rh.style.map(highlight_livre, subset=['Status']), use_container_width=True, hide_index=True)
-
-# ==========================================
-# ABA 4: CONFIGURAÇÕES DAS LINHAS
+# ABA 3: CONFIGURAÇÕES DAS LINHAS
 # ==========================================
 with tab_config:
     st.header("Renomear Linhas de Produção")
-    st.write("Atualize os nomes das 6 linhas de produção. As alterações refletirão imediatamente no Kanban e nos relatórios de equipe.")
-    
     col1, col2 = st.columns(2)
-    
     with st.form("form_linhas"):
-        # Divide as 6 linhas em duas colunas para o formulário ficar mais compacto
         for i in range(3):
             with col1:
                 st.session_state.linhas[i]['nome'] = st.text_input(f"Linha {i+1}", value=st.session_state.linhas[i]['nome'], key=f"input_l{i}")
         for i in range(3, 6):
             with col2:
                 st.session_state.linhas[i]['nome'] = st.text_input(f"Linha {i+1}", value=st.session_state.linhas[i]['nome'], key=f"input_l{i}")
-                
-        if st.form_submit_button("Atualizar Nomes das Linhas", type="primary"):
-            st.success("Nomes atualizados com sucesso!")
+        if st.form_submit_button("Atualizar Nomes", type="primary"):
+            st.success("Atualizado!")
             st.rerun()
